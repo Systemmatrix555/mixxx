@@ -2,11 +2,10 @@
 
 #include <QAction>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QMenu>
 #include <QMessageBox>
-#include <QUrl>
-#include <QXmlStreamReader>
+#include <QStandardPaths>
+#include <QtConcurrentRun>
 #include <QtDebug>
 #include <memory>
 #include <utility>
@@ -17,12 +16,13 @@
 #include "library/dao/settingsdao.h"
 #include "library/itunes/itunesdao.h"
 #include "library/itunes/itunesimporter.h"
-#include "library/itunes/ituneslocalhosttoken.h"
 #include "library/itunes/itunesplaylistmodel.h"
 #include "library/itunes/itunesxmlimporter.h"
 #include "library/library.h"
 #include "library/queryutil.h"
+#include "library/trackcollection.h"
 #include "library/trackcollectionmanager.h"
+#include "library/treeitem.h"
 #include "library/treeitemmodel.h"
 #include "moc_itunesfeature.cpp"
 #include "util/sandbox.h"
@@ -231,9 +231,11 @@ void ITunesFeature::activate(bool forceReload) {
 
 void ITunesFeature::activateChild(const QModelIndex& index) {
     //qDebug() << "ITunesFeature::activateChild()" << index;
-    QString playlist = index.data().toString();
-    qDebug() << "Activating " << playlist;
-    m_pITunesPlaylistModel->setPlaylist(playlist);
+    TreeItem* treeItem = static_cast<TreeItem*>(index.internalPointer());
+    const QString& playlistName = treeItem->getLabel();
+    int playlistId = treeItem->getData().toInt();
+    qDebug() << "Activating playlist" << playlistName << "with id" << playlistId;
+    m_pITunesPlaylistModel->setPlaylistById(playlistId);
     emit showTrackModel(m_pITunesPlaylistModel);
     emit enableCoverArtDisplay(false);
 }
@@ -311,11 +313,11 @@ std::unique_ptr<ITunesImporter> ITunesFeature::makeImporter() {
 #ifdef __MACOS_ITUNES_LIBRARY__
     if (isMacOSImporterUsed()) {
         qDebug() << "Using ITunesMacOSImporter to read default iTunes library";
-        return std::make_unique<ITunesMacOSImporter>(this, m_cancelImport, std::move(dao));
+        return std::make_unique<ITunesMacOSImporter>(this, std::move(dao));
     }
 #endif
     qDebug() << "Using ITunesXMLImporter to read iTunes library from " << m_dbfile;
-    return std::make_unique<ITunesXMLImporter>(this, m_dbfile, m_cancelImport, std::move(dao));
+    return std::make_unique<ITunesXMLImporter>(this, m_dbfile, std::move(dao));
 }
 
 // This method is executed in a separate thread
@@ -368,8 +370,7 @@ void ITunesFeature::onTrackCollectionLoaded() {
         QMessageBox::warning(
                 nullptr,
                 tr("Error Loading iTunes Library"),
-                tr("There was an error loading your iTunes library. Some of "
-                   "your iTunes tracks or playlists may not have loaded."));
+                tr("There was an error loading your iTunes library. Check the logs for details."));
     }
     // calls a slot in the sidebarmodel such that 'isLoading' is removed from the feature title.
     m_title = tr("iTunes");

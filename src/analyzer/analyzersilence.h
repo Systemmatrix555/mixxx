@@ -1,12 +1,20 @@
 #pragma once
 
 #include "analyzer/analyzer.h"
-#include "analyzer/analyzertrack.h"
-#include "audio/frame.h"
 #include "preferences/usersettings.h"
 #include "util/span.h"
 
-class CuePointer;
+class AnalyzerTrack;
+class Track;
+
+namespace mixxx {
+namespace audio {
+
+class FramePos;
+class SampleRate;
+
+} // namespace audio
+} // namespace mixxx
 
 class AnalyzerSilence : public Analyzer {
   public:
@@ -15,8 +23,9 @@ class AnalyzerSilence : public Analyzer {
 
     bool initialize(const AnalyzerTrack& track,
             mixxx::audio::SampleRate sampleRate,
-            SINT totalSamples) override;
-    bool processSamples(const CSAMPLE* pIn, SINT iLen) override;
+            mixxx::audio::ChannelCount channelCount,
+            SINT frameLength) override;
+    bool processSamples(const CSAMPLE* pIn, SINT count) override;
     void storeResults(TrackPointer pTrack) override;
     void cleanup() override;
 
@@ -38,11 +47,13 @@ class AnalyzerSilence : public Analyzer {
     /// last analysis run and is an indicator for file edits or decoder
     /// changes/issues
     static bool verifyFirstSound(std::span<const CSAMPLE> samples,
-            mixxx::audio::FramePos firstSoundFrame);
+            mixxx::audio::FramePos firstSoundFrame,
+            mixxx::audio::ChannelCount channelCount);
 
   private:
     UserSettingsPointer m_pConfig;
-    SINT m_iFramesProcessed;
-    SINT m_iSignalStart;
-    SINT m_iSignalEnd;
+    mixxx::audio::ChannelCount m_channelCount;
+    SINT m_framesProcessed;
+    SINT m_signalStart;
+    SINT m_signalEnd;
 };

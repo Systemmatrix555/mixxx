@@ -1,24 +1,18 @@
 #include "skin/skinloader.h"
 
-#include <QApplication>
 #include <QDir>
 #include <QString>
 #include <QtDebug>
 
 #include "control/controlproxy.h"
 #include "control/controlpushbutton.h"
-#include "controllers/controllermanager.h"
-#include "effects/effectsmanager.h"
-#include "library/library.h"
 #include "mixer/playermanager.h"
 #include "moc_skinloader.cpp"
-#include "recording/recordingmanager.h"
 #include "skin/legacy/launchimage.h"
 #include "skin/legacy/legacyskin.h"
 #include "skin/legacy/legacyskinparser.h"
 #include "util/debug.h"
 #include "util/timer.h"
-#include "vinylcontrol/vinylcontrolmanager.h"
 
 namespace mixxx {
 namespace skin {
@@ -114,20 +108,19 @@ SkinPointer SkinLoader::getConfiguredSkin() const {
     DEBUG_ASSERT(!configSkin.isEmpty());
     SkinPointer pSkin = getSkin(configSkin);
     if (pSkin && pSkin->isValid()) {
-        qInfo() << "Loaded skin" << configSkin;
         return pSkin;
     }
-    qWarning() << "Failed to load skin" << configSkin;
+    qWarning() << "Failed to find configured skin" << configSkin;
 
     // Fallback to default skin as last resort
     const QString defaultSkinName = getDefaultSkinName();
     DEBUG_ASSERT(!defaultSkinName.isEmpty());
     pSkin = getSkin(defaultSkinName);
     VERIFY_OR_DEBUG_ASSERT(pSkin && pSkin->isValid()) {
-        qWarning() << "Failed to load default skin" << defaultSkinName;
+        qWarning() << "Can't find default skin" << defaultSkinName;
         return nullptr;
     }
-    qInfo() << "Loaded default skin" << defaultSkinName;
+    qInfo() << "Found default skin" << defaultSkinName;
     return pSkin;
 }
 
@@ -138,7 +131,7 @@ QString SkinLoader::getDefaultSkinName() const {
 QWidget* SkinLoader::loadConfiguredSkin(QWidget* pParent,
         QSet<ControlObject*>* pSkinCreatedControls,
         mixxx::CoreServices* pCoreServices) {
-    ScopedTimer timer("SkinLoader::loadConfiguredSkin");
+    ScopedTimer timer(QStringLiteral("SkinLoader::loadConfiguredSkin"));
     SkinPointer pSkin = getConfiguredSkin();
 
     // If we don't have a skin then fail. This makes sense here, because the
@@ -187,6 +180,7 @@ QWidget* SkinLoader::loadConfiguredSkin(QWidget* pParent,
     VERIFY_OR_DEBUG_ASSERT(pLoadedSkin != nullptr) {
         qCritical() << "No skin can be loaded, please check your installation.";
     }
+    qInfo() << "Loaded skin" << pSkin->name() << "from" << pSkin->path().filePath();
     return pLoadedSkin;
 }
 
@@ -236,22 +230,22 @@ void SkinLoader::setupSpinnyCoverControls() {
     m_pShowCover = make_parented<ControlProxy>("[Skin]", "show_coverart", this);
     m_pSelectBigSpinnyCover = std::make_unique<ControlPushButton>(
             ConfigKey("[Skin]", "select_big_spinny_or_cover"), true);
-    m_pSelectBigSpinnyCover->setButtonMode(ControlPushButton::TOGGLE);
+    m_pSelectBigSpinnyCover->setButtonMode(mixxx::control::ButtonMode::Toggle);
 
     // This is 1 if [Skin], show_spinnies == 1 OR [Skin],show_coverart == 1
     m_pShowSpinnyAndOrCover = std::make_unique<ControlPushButton>(
             ConfigKey("[Skin]", "show_spinny_or_cover"));
-    m_pShowSpinnyAndOrCover->setButtonMode(ControlPushButton::TOGGLE);
+    m_pShowSpinnyAndOrCover->setButtonMode(mixxx::control::ButtonMode::Toggle);
     m_pShowSpinnyAndOrCover->setReadOnly();
     // This is 1 if [Skin],show_spinny_cover == 1 AND [Skin],select_big_spinny_coverart == 0
     m_pShowSmallSpinnyCover = std::make_unique<ControlPushButton>(
             ConfigKey("[Skin]", "show_small_spinny_or_cover"));
-    m_pShowSmallSpinnyCover->setButtonMode(ControlPushButton::TOGGLE);
+    m_pShowSmallSpinnyCover->setButtonMode(mixxx::control::ButtonMode::Toggle);
     m_pShowSmallSpinnyCover->setReadOnly();
     // This is 1 if [Skin],show_spinny_cover == 1 AND [Skin],select_big_spinny_coverart == 1
     m_pShowBigSpinnyCover = std::make_unique<ControlPushButton>(
             ConfigKey("[Skin]", "show_big_spinny_or_cover"));
-    m_pShowBigSpinnyCover->setButtonMode(ControlPushButton::TOGGLE);
+    m_pShowBigSpinnyCover->setButtonMode(mixxx::control::ButtonMode::Toggle);
     m_pShowBigSpinnyCover->setReadOnly();
 
     m_pShowSpinny->connectValueChanged(this, &SkinLoader::updateSpinnyCoverControls);
@@ -291,10 +285,11 @@ void SkinLoader::setupMicDuckingControls() {
     // This is 1 if at least one microphone device is configured
     m_pShowDuckingControls = std::make_unique<ControlPushButton>(
             ConfigKey("[Skin]", "show_ducking_controls"));
-    m_pShowDuckingControls->setButtonMode(ControlPushButton::TOGGLE);
+    m_pShowDuckingControls->setButtonMode(mixxx::control::ButtonMode::Toggle);
     m_pShowDuckingControls->setReadOnly();
 
-    m_pNumMics = make_parented<ControlProxy>("[Master]", "num_microphones", this);
+    m_pNumMics = make_parented<ControlProxy>(
+            QStringLiteral("[App]"), QStringLiteral("num_microphones"), this);
     m_pNumMics->connectValueChanged(this, &SkinLoader::slotNumMicsChanged);
 
     m_micDuckingControlsCreated = true;
@@ -324,7 +319,7 @@ void SkinLoader::updateDuckingControl() {
         return;
     }
     double atLeastOneMicConfigured = 0.0;
-    for (auto* pMicCon : qAsConst(m_pMicConfiguredControls)) {
+    for (auto* pMicCon : std::as_const(m_pMicConfiguredControls)) {
         if (pMicCon->toBool()) {
             atLeastOneMicConfigured = 1.0;
             break;

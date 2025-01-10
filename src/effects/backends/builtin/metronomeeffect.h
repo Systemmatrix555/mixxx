@@ -3,23 +3,16 @@
 #include <QMap>
 
 #include "effects/backends/effectprocessor.h"
-#include "engine/effects/engineeffect.h"
-#include "engine/effects/engineeffectparameter.h"
-#include "engine/filters/enginefilterpansingle.h"
 #include "util/class.h"
-#include "util/defs.h"
-#include "util/sample.h"
 #include "util/types.h"
 
 class MetronomeGroupState final : public EffectState {
   public:
     MetronomeGroupState(const mixxx::EngineParameters& engineParameters)
-            : EffectState(engineParameters),
-              m_framesSinceClickStart(0) {
-    }
+            : EffectState(engineParameters) {};
     ~MetronomeGroupState() override = default;
 
-    SINT m_framesSinceClickStart;
+    std::size_t framesSinceLastClick = 0;
 };
 
 class MetronomeEffect : public EffectProcessorImpl<MetronomeGroupState> {
@@ -44,6 +37,7 @@ class MetronomeEffect : public EffectProcessorImpl<MetronomeGroupState> {
   private:
     EngineEffectParameterPointer m_pBpmParameter;
     EngineEffectParameterPointer m_pSyncParameter;
+    EngineEffectParameterPointer m_pGainParameter;
 
     DISALLOW_COPY_AND_ASSIGN(MetronomeEffect);
 };

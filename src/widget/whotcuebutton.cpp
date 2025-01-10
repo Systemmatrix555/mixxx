@@ -1,12 +1,14 @@
 #include "widget/whotcuebutton.h"
 
-#include <QStyleOption>
-#include <QStylePainter>
-#include <QtDebug>
+#include <QMouseEvent>
 
 #include "mixer/playerinfo.h"
 #include "moc_whotcuebutton.cpp"
+#include "skin/legacy/skincontext.h"
 #include "track/track.h"
+#include "util/valuetransformer.h"
+#include "widget/controlwidgetconnection.h"
+#include "widget/wbasewidget.h"
 
 namespace {
 constexpr int kDefaultDimBrightThreshold = 127;
@@ -33,7 +35,10 @@ void WHotcueButton::setup(const QDomNode& node, const SkinContext& context) {
     if (ok && hotcue > 0) {
         m_hotcue = hotcue - 1;
     } else {
-        SKIN_WARNING(node, context) << "Hotcue value invalid";
+        SKIN_WARNING(node,
+                context,
+                QStringLiteral("Hotcue index '%1' invalid")
+                        .arg(context.selectString(node, QStringLiteral("Hotcue"))));
     }
 
     bool okay;
@@ -65,26 +70,25 @@ void WHotcueButton::setup(const QDomNode& node, const SkinContext& context) {
     m_pCoType->connectValueChanged(this, &WHotcueButton::slotTypeChanged);
     slotTypeChanged(m_pCoType->get());
 
-    auto* pLeftConnection = new ControlParameterWidgetConnection(
-            this,
-            createConfigKey(QStringLiteral("activate")),
-            nullptr,
-            ControlParameterWidgetConnection::DIR_FROM_WIDGET,
-            ControlParameterWidgetConnection::EMIT_ON_PRESS_AND_RELEASE);
-    addLeftConnection(pLeftConnection);
+    addConnection(std::make_unique<ControlParameterWidgetConnection>(
+                          this,
+                          getLeftClickConfigKey(), // "activate"
+                          nullptr,
+                          ControlParameterWidgetConnection::DIR_FROM_WIDGET,
+                          ControlParameterWidgetConnection::EMIT_ON_PRESS_AND_RELEASE),
+            WBaseWidget::ConnectionSide::Left);
 
-    auto* pDisplayConnection = new ControlParameterWidgetConnection(
-            this,
-            createConfigKey(QStringLiteral("enabled")),
-            nullptr,
-            ControlParameterWidgetConnection::DIR_TO_WIDGET,
-            ControlParameterWidgetConnection::EMIT_NEVER);
-    addConnection(pDisplayConnection);
-    setDisplayConnection(pDisplayConnection);
+    addAndSetDisplayConnection(std::make_unique<ControlParameterWidgetConnection>(
+                                       this,
+                                       createConfigKey(QStringLiteral("status")),
+                                       nullptr,
+                                       ControlParameterWidgetConnection::DIR_TO_WIDGET,
+                                       ControlParameterWidgetConnection::EMIT_NEVER),
+            WBaseWidget::ConnectionSide::None);
 
     QDomNode con = context.selectNode(node, QStringLiteral("Connection"));
     if (!con.isNull()) {
-        SKIN_WARNING(node, context) << "Additional Connections are not allowed";
+        SKIN_WARNING(node, context, QStringLiteral("Additional Connections are not allowed"));
     }
 }
 
@@ -105,7 +109,7 @@ void WHotcueButton::mousePressEvent(QMouseEvent* e) {
             }
 
             CuePointer pHotCue;
-            QList<CuePointer> cueList = pTrack->getCuePoints();
+            const QList<CuePointer> cueList = pTrack->getCuePoints();
             for (const auto& pCue : cueList) {
                 if (pCue->getHotCue() == m_hotcue) {
                     pHotCue = pCue;
@@ -119,7 +123,7 @@ void WHotcueButton::mousePressEvent(QMouseEvent* e) {
                 pTrack->removeCue(pHotCue);
                 return;
             }
-            m_pCueMenuPopup->setTrackAndCue(pTrack, pHotCue);
+            m_pCueMenuPopup->setTrackCueGroup(pTrack, pHotCue, m_group);
             // use the bottom left corner as starting point for popup
             m_pCueMenuPopup->popup(mapToGlobal(QPoint(0, height())));
         }

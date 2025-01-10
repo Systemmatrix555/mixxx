@@ -1,10 +1,12 @@
 #include "library/autodj/dlgautodj.h"
 
-#include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMessageBox>
 
+#include "controllers/keyboard/keyboardeventfilter.h"
+#include "library/library.h"
 #include "library/playlisttablemodel.h"
-#include "library/trackcollectionmanager.h"
 #include "moc_dlgautodj.cpp"
 #include "track/track.h"
 #include "util/assert.h"
@@ -144,7 +146,11 @@ DlgAutoDJ::DlgAutoDJ(WLibrary* parent,
             "Skip Silence:\n"
             "Play the whole track except for silence at the beginning and end.\n"
             "Begin crossfading from the selected number of seconds before the\n"
-            "last sound.");
+            "last sound.\n"
+            "\n"
+            "Skip Silence Start Full Volume:\n"
+            "The same as Skip Silence, but starting transitions with a centered\n"
+            "crossfader, so that the intro starts at full volume.\n");
 
     pushButtonFadeNow->setToolTip(fadeBtnTooltip);
     pushButtonSkipNext->setToolTip(skipBtnTooltip);
@@ -177,6 +183,8 @@ DlgAutoDJ::DlgAutoDJ(WLibrary* parent,
             static_cast<int>(AutoDJProcessor::TransitionMode::FixedFullTrack));
     fadeModeCombobox->addItem(tr("Skip Silence"),
             static_cast<int>(AutoDJProcessor::TransitionMode::FixedSkipSilence));
+    fadeModeCombobox->addItem(tr("Skip Silence Start Full Volume"),
+            static_cast<int>(AutoDJProcessor::TransitionMode::FixedStartCenterSkipSilence));
     fadeModeCombobox->setCurrentIndex(
             fadeModeCombobox->findData(static_cast<int>(m_pAutoDJProcessor->getTransitionMode())));
     connect(fadeModeCombobox,
@@ -246,18 +254,6 @@ void DlgAutoDJ::onSearch(const QString& text) {
     Q_UNUSED(text);
 }
 
-void DlgAutoDJ::activateSelectedTrack() {
-    m_pTrackTableView->activateSelectedTrack();
-}
-
-void DlgAutoDJ::loadSelectedTrackToGroup(const QString& group, bool play) {
-    m_pTrackTableView->loadSelectedTrackToGroup(group, play);
-}
-
-void DlgAutoDJ::moveSelection(int delta) {
-    m_pTrackTableView->moveSelection(delta);
-}
-
 void DlgAutoDJ::shufflePlaylistButton(bool) {
     QModelIndexList indexList = m_pTrackTableView->selectionModel()->selectedRows();
 
@@ -295,10 +291,10 @@ void DlgAutoDJ::autoDJError(AutoDJProcessor::AutoDJError error) {
                 tr("One deck must be stopped to enable Auto DJ mode."),
                 QMessageBox::Ok);
         break;
-    case AutoDJProcessor::ADJ_DECKS_3_4_PLAYING:
+    case AutoDJProcessor::ADJ_UNUSED_DECK_PLAYING:
         QMessageBox::warning(nullptr,
                 tr("Auto DJ"),
-                tr("Decks 3 and 4 must be stopped to enable Auto DJ mode."),
+                tr("Decks not used for Auto DJ must be stopped to enable Auto DJ mode."),
                 QMessageBox::Ok);
         break;
     case AutoDJProcessor::ADJ_OK:
@@ -349,32 +345,27 @@ void DlgAutoDJ::slotTransitionModeChanged(int newIndex) {
     m_pAutoDJProcessor->setTransitionMode(
             static_cast<AutoDJProcessor::TransitionMode>(
                     fadeModeCombobox->itemData(newIndex).toInt()));
-    // Move focus to tracks table to immediately allow keyboard shortcuts again.
-    setFocus();
+    // Clicking on a transition mode item moves keyboard focus to the list widget.
+    // Move focus back to the previously focused library widget.
+    ControlObject::set(ConfigKey("[Library]", "refocus_prev_widget"), 1);
 }
 
-void DlgAutoDJ::slotRepeatPlaylistChanged(int checkState) {
-    bool checked = static_cast<bool>(checkState);
+void DlgAutoDJ::slotRepeatPlaylistChanged(bool checked) {
     m_pConfig->setValue(ConfigKey(kPreferenceGroupName, kRepeatPlaylistPreference),
             checked);
 }
 
 void DlgAutoDJ::updateSelectionInfo() {
-    double duration = 0.0;
-
     QModelIndexList indices = m_pTrackTableView->selectionModel()->selectedRows();
 
-    for (int i = 0; i < indices.size(); ++i) {
-        TrackPointer pTrack = m_pAutoDJTableModel->getTrack(indices.at(i));
-        if (pTrack) {
-            duration += pTrack->getDuration();
-        }
-    }
+    // Derive total duration from the table model. This is much faster than
+    // getting the duration from individual track objects.
+    mixxx::Duration duration = m_pAutoDJTableModel->getTotalDuration(indices);
 
     QString label;
 
     if (!indices.isEmpty()) {
-        label.append(mixxx::DurationBase::formatTime(duration));
+        label.append(mixxx::DurationBase::formatTime(duration.toDoubleSeconds()));
         label.append(QString(" (%1)").arg(indices.size()));
         labelSelectionInfo->setToolTip(tr("Displays the duration and number of selected tracks."));
         labelSelectionInfo->setText(label);
@@ -393,16 +384,21 @@ void DlgAutoDJ::setFocus() {
     m_pTrackTableView->setFocus();
 }
 
+void DlgAutoDJ::pasteFromSidebar() {
+    m_pTrackTableView->pasteFromSidebar();
+}
+
 void DlgAutoDJ::keyPressEvent(QKeyEvent* pEvent) {
-    // Return, Enter and Escape key move focus to the AutoDJ queue to immediately
-    // allow keyboard shortcuts again.
+    // If we receive key events either the mode selector or the spinbox are focused.
+    // Return, Enter and Escape move focus back to the previously focused
+    // library widget in order to immediately allow keyboard shortcuts again.
     if (pEvent->key() == Qt::Key_Return ||
             pEvent->key() == Qt::Key_Enter ||
             pEvent->key() == Qt::Key_Escape) {
-        setFocus();
+        ControlObject::set(ConfigKey("[Library]", "refocus_prev_widget"), 1);
         return;
     }
-    return QWidget::keyPressEvent(pEvent);
+    QWidget::keyPressEvent(pEvent);
 }
 
 void DlgAutoDJ::saveCurrentViewState() {

@@ -7,11 +7,12 @@
 
 #include "control/pollingcontrolproxy.h"
 #include "soundio/sounddevice.h"
+#include "soundio/soundmanagerconfig.h"
 #include "util/duration.h"
+#include "util/fifo.h"
 #include "util/performancetimer.h"
 
 class SoundManager;
-class ControlProxy;
 
 class SoundDevicePortAudio : public SoundDevice {
   public:
@@ -46,9 +47,10 @@ class SoundDevicePortAudio : public SoundDevice {
                         const PaStreamCallbackTimeInfo *timeInfo,
                         PaStreamCallbackFlags statusFlags);
 
-    unsigned int getDefaultSampleRate() const override {
-        return m_deviceInfo ? static_cast<unsigned int>(
-            m_deviceInfo->defaultSampleRate) : 44100;
+    mixxx::audio::SampleRate getDefaultSampleRate() const override {
+        return m_deviceInfo ? mixxx::audio::SampleRate::fromDouble(
+                                      m_deviceInfo->defaultSampleRate)
+                            : SoundManagerConfig::kMixxxDefaultSampleRate;
     }
 
   private:
@@ -57,7 +59,7 @@ class SoundDevicePortAudio : public SoundDevice {
     void updateAudioLatencyUsage(const SINT framesPerBuffer);
 
     // PortAudio stream for this device.
-    PaStream* volatile m_pStream;
+    std::atomic<PaStream*> m_pStream;
     // Struct containing information about this device. Don't free() it, it
     // belongs to PortAudio.
     const PaDeviceInfo* m_deviceInfo;
@@ -75,11 +77,12 @@ class SoundDevicePortAudio : public SoundDevice {
     QString m_lastError;
     // Whether we have set the thread priority to realtime or not.
     bool m_bSetThreadPriority;
-    PollingControlProxy m_masterAudioLatencyUsage;
+    PollingControlProxy m_audioLatencyUsage;
     mixxx::Duration m_timeInAudioCallback;
     int m_framesSinceAudioLatencyUsageUpdate;
     int m_syncBuffers;
     int m_invalidTimeInfoCount;
     PerformanceTimer m_clkRefTimer;
     PaTime m_lastCallbackEntrytoDacSecs;
+    std::atomic<int> m_callbackResult;
 };

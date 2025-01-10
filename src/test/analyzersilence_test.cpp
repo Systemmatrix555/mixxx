@@ -4,13 +4,14 @@
 
 #include <vector>
 
+#include "analyzer/analyzertrack.h"
 #include "engine/engine.h"
 #include "test/mixxxtest.h"
 #include "track/track.h"
 
 namespace {
 
-constexpr mixxx::audio::ChannelCount kChannelCount = mixxx::kEngineChannelCount;
+constexpr mixxx::audio::ChannelCount kChannelCount = mixxx::kEngineChannelOutputCount;
 constexpr int kTrackLengthFrames = 100000;
 constexpr double kTonePitchHz = 1000.0; // 1kHz
 
@@ -37,7 +38,10 @@ class AnalyzerSilenceTest : public MixxxTest {
     }
 
     void analyzeTrack() {
-        analyzerSilence.initialize(pTrack, pTrack->getSampleRate(), nTrackSampleDataLength);
+        analyzerSilence.initialize(AnalyzerTrack(pTrack),
+                pTrack->getSampleRate(),
+                mixxx::audio::ChannelCount(kChannelCount),
+                kTrackLengthFrames);
         analyzerSilence.processSamples(pTrackSampleData.data(), nTrackSampleDataLength);
         analyzerSilence.storeResults(pTrack);
         analyzerSilence.cleanup();
@@ -231,8 +235,14 @@ TEST_F(AnalyzerSilenceTest, verifyFirstSound) {
             -0.0020f};
     std::span<const CSAMPLE> samples = s;
 
-    EXPECT_EQ(false, AnalyzerSilence::verifyFirstSound(samples, mixxx::audio::FramePos(5)));
-    EXPECT_EQ(true, AnalyzerSilence::verifyFirstSound(samples, mixxx::audio::FramePos(4)));
+    EXPECT_EQ(false,
+            AnalyzerSilence::verifyFirstSound(samples,
+                    mixxx::audio::FramePos(5),
+                    mixxx::audio::ChannelCount::stereo()));
+    EXPECT_EQ(true,
+            AnalyzerSilence::verifyFirstSound(samples,
+                    mixxx::audio::FramePos(4),
+                    mixxx::audio::ChannelCount::stereo()));
 }
 
 } // namespace

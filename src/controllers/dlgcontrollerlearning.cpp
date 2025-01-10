@@ -4,6 +4,7 @@
 
 #include "control/controlobject.h"
 #include "controllers/learningutils.h"
+#include "controllers/midi/midicontroller.h"
 #include "controllers/midi/midiutils.h"
 #include "moc_dlgcontrollerlearning.cpp"
 #include "util/versionstore.h"
@@ -25,6 +26,7 @@ DlgControllerLearning::DlgControllerLearning(QWidget* parent,
     qRegisterMetaType<MidiInputMappings>("MidiInputMappings");
 
     setupUi(this);
+    labelDescription->setWordWrap(true);
     labelMappedTo->setText("");
 
     QString helpTitle(tr("Click anywhere in Mixxx or choose a control to learn"));

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "waveformrendererabstract.h"
-#include "waveformsignalcolors.h"
 #include "skin/legacy/skincontext.h"
+#include "util/span.h"
+#include "waveformrendererabstract.h"
 
-class ControlObject;
 class ControlProxy;
+class WaveformSignalColors;
 
 class WaveformRendererSignalBase : public WaveformRendererAbstract {
 public:
@@ -21,8 +21,11 @@ public:
   protected:
     void deleteControls();
 
-    void getGains(float* pAllGain, float* pLowGain, float* pMidGain,
-                  float* highGain);
+    void getGains(float* pAllGain,
+            bool applyCompensation,
+            float* pLowGain,
+            float* pMidGain,
+            float* highGain);
 
   protected:
     ControlProxy* m_pEQEnabled;

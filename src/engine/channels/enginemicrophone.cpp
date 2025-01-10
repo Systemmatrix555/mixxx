@@ -2,12 +2,11 @@
 
 #include <QtDebug>
 
-#include "control/control.h"
+#include "audio/types.h"
 #include "control/controlaudiotaperpot.h"
 #include "effects/effectsmanager.h"
 #include "engine/effects/engineeffectsmanager.h"
 #include "moc_enginemicrophone.cpp"
-#include "preferences/usersettings.h"
 #include "util/sample.h"
 
 EngineMicrophone::EngineMicrophone(const ChannelHandleAndGroup& handleGroup,
@@ -19,10 +18,9 @@ EngineMicrophone::EngineMicrophone(const ChannelHandleAndGroup& handleGroup,
           m_pPregain(new ControlAudioTaperPot(ConfigKey(getGroup(), "pregain"), -12, 12, 0.5)) {
     // Make input_configured read-only.
     m_pInputConfigured->setReadOnly();
-    ControlDoublePrivate::insertAlias(ConfigKey(getGroup(), "enabled"),
-                                      ConfigKey(getGroup(), "input_configured"));
+    m_pInputConfigured->addAlias(ConfigKey(getGroup(), QStringLiteral("enabled")));
 
-    setMaster(false); // Use "talkover" button to enable microphones
+    setMainMix(false); // Use "talkover" button to enable microphones
 }
 
 EngineMicrophone::~EngineMicrophone() {
@@ -44,7 +42,7 @@ EngineChannel::ActiveState EngineMicrophone::updateActiveState() {
 }
 
 void EngineMicrophone::onInputConfigured(const AudioInput& input) {
-    if (input.getType() != AudioPath::MICROPHONE) {
+    if (input.getType() != AudioPathType::Microphone) {
         // This is an error!
         qWarning() << "EngineMicrophone connected to AudioInput for a non-Microphone type!";
         return;
@@ -54,7 +52,7 @@ void EngineMicrophone::onInputConfigured(const AudioInput& input) {
 }
 
 void EngineMicrophone::onInputUnconfigured(const AudioInput& input) {
-    if (input.getType() != AudioPath::MICROPHONE) {
+    if (input.getType() != AudioPathType::Microphone) {
         // This is an error!
         qWarning() << "EngineMicrophone connected to AudioInput for a non-Microphone type!";
         return;
@@ -70,27 +68,28 @@ void EngineMicrophone::receiveBuffer(
     m_sampleBuffer = pBuffer;
 }
 
-void EngineMicrophone::process(CSAMPLE* pOut, const int iBufferSize) {
+void EngineMicrophone::process(CSAMPLE* pOut, const std::size_t bufferSize) {
     // If configured read into the output buffer.
     // Otherwise, skip the appropriate number of samples to throw them away.
     const CSAMPLE* sampleBuffer = m_sampleBuffer; // save pointer on stack
     CSAMPLE_GAIN pregain = static_cast<CSAMPLE_GAIN>(m_pPregain->get());
     if (sampleBuffer) {
-        SampleUtil::copyWithGain(pOut, sampleBuffer, pregain, iBufferSize);
+        SampleUtil::copyWithGain(pOut, sampleBuffer, pregain, bufferSize);
         EngineEffectsManager* pEngineEffectsManager = m_pEffectsManager->getEngineEffectsManager();
         if (pEngineEffectsManager != nullptr) {
-            pEngineEffectsManager->processPreFaderInPlace(
-                    m_group.handle(), m_pEffectsManager->getMasterHandle(), pOut, iBufferSize,
-                    // TODO(jholthuis): Use mixxx::audio::SampleRate instead
-                    static_cast<unsigned int>(m_sampleRate.get()));
+            pEngineEffectsManager->processPreFaderInPlace(m_group.handle(),
+                    m_pEffectsManager->getMainHandle(),
+                    pOut,
+                    bufferSize,
+                    mixxx::audio::SampleRate::fromDouble(m_sampleRate.get()));
         }
     } else {
-        SampleUtil::clear(pOut, iBufferSize);
+        SampleUtil::clear(pOut, bufferSize);
     }
     m_sampleBuffer = nullptr;
 
     // Update VU meter
-    m_vuMeter.process(pOut, iBufferSize);
+    m_vuMeter.process(pOut, bufferSize);
 }
 
 void EngineMicrophone::collectFeatures(GroupFeatureState* pGroupFeatures) const {

@@ -1,17 +1,15 @@
 #include "library/dao/cuedao.h"
 
+#include <QThread>
 #include <QVariant>
 #include <QtDebug>
-#include <QtSql>
 
 #include "engine/engine.h"
 #include "library/queryutil.h"
-#include "track/track.h"
 #include "util/assert.h"
 #include "util/color/rgbcolor.h"
 #include "util/db/fwdsqlquery.h"
 #include "util/logger.h"
-#include "util/performancetimer.h"
 
 namespace {
 
@@ -44,7 +42,8 @@ CuePointer cueFromRow(const QSqlRecord& row) {
     const auto position =
             mixxx::audio::FramePos::fromEngineSamplePosMaybeInvalid(
                     row.value(row.indexOf("position")).toDouble());
-    double lengthFrames = row.value(row.indexOf("length")).toDouble() / mixxx::kEngineChannelCount;
+    double lengthFrames = row.value(row.indexOf("length")).toDouble() /
+            mixxx::kEngineChannelOutputCount;
     int hotcue = row.value(row.indexOf("hotcue")).toInt();
     QString label = labelFromQVariant(row.value(row.indexOf("label")));
     mixxx::RgbColor::optional_t color = mixxx::RgbColor::fromQVariant(row.value(row.indexOf("color")));
@@ -85,7 +84,7 @@ QList<CuePointer> CueDAO::getCuesForTrack(TrackId trackId) const {
     DEBUG_ASSERT(
             query.isPrepared() &&
             !query.hasError());
-    query.bindValue(":id", trackId.toVariant());
+    query.bindValue(":id", trackId);
     if (!query.execPrepared()) {
         kLogger.warning()
                 << "Failed to load cues of track"
@@ -182,7 +181,7 @@ bool CueDAO::saveCue(TrackId trackId, Cue* cue) const {
     query.bindValue(":track_id", trackId.toVariant());
     query.bindValue(":type", static_cast<int>(cue->getType()));
     query.bindValue(":position", cue->getPosition().toEngineSamplePosMaybeInvalid());
-    query.bindValue(":length", cue->getLengthFrames() * mixxx::kEngineChannelCount);
+    query.bindValue(":length", cue->getLengthFrames() * mixxx::kEngineChannelOutputCount);
     query.bindValue(":hotcue", cue->getHotCue());
     query.bindValue(":label", labelToQVariant(cue->getLabel()));
     query.bindValue(":color", mixxx::RgbColor::toQVariant(cue->getColor()));
@@ -230,7 +229,7 @@ void CueDAO::saveTrackCues(
     DEBUG_ASSERT(
             query.isPrepared() &&
             !query.hasError());
-    query.bindValue(":track_id", trackId.toVariant());
+    query.bindValue(":track_id", trackId);
     if (!query.execPrepared()) {
         kLogger.warning()
                 << "Failed to delete orphaned cues of track"

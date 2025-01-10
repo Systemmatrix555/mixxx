@@ -3,12 +3,11 @@
 #include <QList>
 #include <QString>
 
+#include "audio/types.h"
 #include "engine/channelhandle.h"
 #include "engine/effects/engineeffectsdelay.h"
-#include "engine/effects/groupfeaturestate.h"
 #include "engine/effects/message.h"
 #include "util/class.h"
-#include "util/memory.h"
 #include "util/samplebuffer.h"
 #include "util/types.h"
 
@@ -41,8 +40,8 @@ class EngineEffectChain final : public EffectsRequestHandler {
             const ChannelHandle& outputHandle,
             CSAMPLE* pIn,
             CSAMPLE* pOut,
-            const unsigned int numSamples,
-            const unsigned int sampleRate,
+            const std::size_t numSamples,
+            const mixxx::audio::SampleRate sampleRate,
             const GroupFeatureState& groupFeatures,
             bool fadeout);
 

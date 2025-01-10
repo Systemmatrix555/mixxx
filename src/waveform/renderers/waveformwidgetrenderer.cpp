@@ -3,14 +3,12 @@
 #include <QPainter>
 #include <QPainterPath>
 
-#include "control/controlobject.h"
 #include "control/controlproxy.h"
 #include "track/track.h"
 #include "util/math.h"
-#include "util/performancetimer.h"
+#include "waveform/renderers/waveformrendererabstract.h"
 #include "waveform/visualplayposition.h"
 #include "waveform/waveform.h"
-#include "widget/wwidget.h"
 
 const double WaveformWidgetRenderer::s_waveformMinZoom = 1.0;
 const double WaveformWidgetRenderer::s_waveformMaxZoom = 10.0;
@@ -23,14 +21,15 @@ constexpr int kDefaultDimBrightThreshold = 127;
 
 WaveformWidgetRenderer::WaveformWidgetRenderer(const QString& group)
         : m_group(group),
+#ifdef __STEM__
+          m_selectedStems(mixxx::StemChannelSelection()),
+#endif
           m_orientation(Qt::Horizontal),
           m_dimBrightThreshold(kDefaultDimBrightThreshold),
           m_height(-1),
           m_width(-1),
           m_devicePixelRatio(1.0f),
 
-          m_firstDisplayedPosition(0.0),
-          m_lastDisplayedPosition(0.0),
           m_trackPixelCount(0.0),
 
           m_zoomFactor(1.0),
@@ -39,7 +38,6 @@ WaveformWidgetRenderer::WaveformWidgetRenderer(const QString& group)
           m_alphaBeatGrid(90),
           // Really create some to manage those;
           m_visualPlayPosition(nullptr),
-          m_playPosVSample(0),
           m_totalVSamples(0),
           m_pRateRatioCO(nullptr),
           m_pGainControlObject(nullptr),
@@ -48,10 +46,17 @@ WaveformWidgetRenderer::WaveformWidgetRenderer(const QString& group)
           m_trackSamples(0),
           m_scaleFactor(1.0),
           m_playMarkerPosition(s_defaultPlayMarkerPosition),
-          m_passthroughEnabled(false),
-          m_playPos(-1.0),
-          m_truePosSample(-1.0) {
+          m_passthroughEnabled(false) {
     //qDebug() << "WaveformWidgetRenderer";
+    for (int type = ::WaveformRendererAbstract::Play;
+            type <= ::WaveformRendererAbstract::Slip;
+            type++) {
+        m_firstDisplayedPosition[type] = 0.0;
+        m_lastDisplayedPosition[type] = 0.0;
+        m_posVSample[type] = 0.0;
+        m_pos[type] = -1.0; // disable renderers
+        m_truePosSample[type] = -1.0;
+    }
 
 #ifdef WAVEFORMWIDGETRENDERER_DEBUG
     m_timer = new QTime();
@@ -105,12 +110,18 @@ bool WaveformWidgetRenderer::init() {
 
 void WaveformWidgetRenderer::onPreRender(VSyncThread* vsyncThread) {
     if (m_passthroughEnabled) {
-        m_playPos = -1; // disables renderers in draw()
+        // disables renderers in draw()
+        for (int type = ::WaveformRendererAbstract::Play;
+                type <= ::WaveformRendererAbstract::Slip;
+                type++) {
+            m_pos[type] = -1.0;
+            m_truePosSample[type] = -1.0;
+        }
         return;
     }
 
     // For a valid track to render we need
-    m_trackSamples = static_cast<int>(m_pTrackSamplesControlObject->get());
+    m_trackSamples = m_pTrackSamplesControlObject->get();
     if (m_trackSamples <= 0) {
         return;
     }
@@ -118,9 +129,7 @@ void WaveformWidgetRenderer::onPreRender(VSyncThread* vsyncThread) {
     //Fetch parameters before rendering in order the display all sub-renderers with the same values
     double rateRatio = m_pRateRatioCO->get();
 
-    // This gain adjustment compensates for an arbitrary /2 gain chop in
-    // EnginePregain. See the comment there.
-    m_gain = m_pGainControlObject->get() * 2;
+    m_gain = m_pGainControlObject->get();
 
     // Compute visual sample to pixel ratio
     // Allow waveform to spread one visual sample across a hundred pixels
@@ -137,19 +146,15 @@ void WaveformWidgetRenderer::onPreRender(VSyncThread* vsyncThread) {
         }
     }
 
-    double truePlayPos = m_visualPlayPosition->getAtNextVSync(vsyncThread);
+    double truePos[2]{0};
+    m_visualPlayPosition->getPlaySlipAtNextVSync(vsyncThread,
+            truePos + ::WaveformRendererAbstract::Play,
+            truePos + ::WaveformRendererAbstract::Slip);
     // truePlayPos = -1 happens, when a new track is in buffer but m_visualPlayPosition was not updated
 
-    if (m_audioSamplePerPixel > 0 && truePlayPos != -1) {
+    if (m_audioSamplePerPixel > 0) {
         // Track length in pixels.
-        m_trackPixelCount = static_cast<double>(m_trackSamples) / 2.0 / m_audioSamplePerPixel;
-
-        // Avoid pixel jitter in play position by rounding to the nearest track
-        // pixel.
-        m_playPos = round(truePlayPos * m_trackPixelCount) / m_trackPixelCount;
-        m_totalVSamples = static_cast<int>(m_trackPixelCount * m_visualSamplePerPixel);
-        m_playPosVSample = static_cast<int>(m_playPos * m_totalVSamples);
-        m_truePosSample = truePlayPos * static_cast<double>(m_trackSamples);
+        m_trackPixelCount = m_trackSamples / 2.0 / m_audioSamplePerPixel;
         double leftOffset = m_playMarkerPosition;
         double rightOffset = 1.0 - m_playMarkerPosition;
 
@@ -163,11 +168,26 @@ void WaveformWidgetRenderer::onPreRender(VSyncThread* vsyncThread) {
         //        "displayedLengthLeft=" << displayedLengthLeft <<
         //        "displayedLengthRight=" << displayedLengthRight;
 
-        m_firstDisplayedPosition = m_playPos - displayedLengthLeft;
-        m_lastDisplayedPosition = m_playPos + displayedLengthRight;
+        m_totalVSamples = static_cast<int>(m_trackPixelCount * m_visualSamplePerPixel);
+        for (int type = ::WaveformRendererAbstract::Play;
+                type <= ::WaveformRendererAbstract::Slip;
+                type++) {
+            // Avoid pixel jitter in play position by rounding to the nearest track
+            // pixel.
+            m_pos[type] = round(truePos[type] * m_trackPixelCount) / m_trackPixelCount;
+            m_posVSample[type] = static_cast<int>(m_pos[type] * m_totalVSamples);
+            m_truePosSample[type] = truePos[type] * static_cast<double>(m_trackSamples);
+            m_firstDisplayedPosition[type] = m_pos[type] - displayedLengthLeft;
+            m_lastDisplayedPosition[type] = m_pos[type] + displayedLengthRight;
+        }
+
     } else {
-        m_playPos = -1.0; // disable renderers
-        m_truePosSample = -1.0;
+        for (int type = ::WaveformRendererAbstract::Play;
+                type <= ::WaveformRendererAbstract::Slip;
+                type++) {
+            m_pos[type] = -1.0; // disable renderers
+            m_truePosSample[type] = -1.0;
+        }
     }
 
     // qDebug() << "WaveformWidgetRenderer::onPreRender" <<
@@ -245,8 +265,8 @@ void WaveformWidgetRenderer::draw(QPainter* painter, QPaintEvent* event) {
 }
 
 void WaveformWidgetRenderer::drawPlayPosmarker(QPainter* painter) {
-    const int lineX = static_cast<int>(m_width * m_playMarkerPosition);
-    const int lineY = static_cast<int>(m_height * m_playMarkerPosition);
+    const int lineX = std::lround(m_width * m_playMarkerPosition);
+    const int lineY = std::lround(m_height * m_playMarkerPosition);
 
     // draw dim outlines to increase playpos/waveform contrast
     painter->setOpacity(0.5);
@@ -351,12 +371,12 @@ void WaveformWidgetRenderer::setPassThroughEnabled(bool enabled) {
     // the renderer state dirty in order trigger the render process. This is only
     // required for the background renderer since that's the only one that'll
     // be processed if passtrhough is active.
-    if (m_rendererStack.size()) {
+    if (!m_rendererStack.isEmpty()) {
         m_rendererStack[0]->setDirty(true);
     }
 }
 
-void WaveformWidgetRenderer::resize(int width, int height, float devicePixelRatio) {
+void WaveformWidgetRenderer::resizeRenderer(int width, int height, float devicePixelRatio) {
     m_width = width;
     m_height = height;
     m_devicePixelRatio = devicePixelRatio;
@@ -399,6 +419,12 @@ void WaveformWidgetRenderer::setDisplayBeatGridAlpha(int alpha) {
     m_alphaBeatGrid = alpha;
 }
 
+#ifdef __STEM__
+void WaveformWidgetRenderer::selectStem(mixxx::StemChannelSelection stemMask) {
+    m_selectedStems = stemMask;
+}
+#endif
+
 void WaveformWidgetRenderer::setTrack(TrackPointer track) {
     m_pTrack = track;
     //used to postpone first display until track sample is actually available
@@ -417,13 +443,21 @@ ConstWaveformPointer WaveformWidgetRenderer::getWaveform() const {
 }
 
 WaveformMarkPointer WaveformWidgetRenderer::getCueMarkAtPoint(QPoint point) const {
-    for (auto it = m_markPositions.constBegin(); it != m_markPositions.constEnd(); ++it) {
-        WaveformMarkPointer pMark = it.key();
+    // The m_markPositions list follows the order of drawing, so we search the
+    // list in reverse order to find the hovered mark.
+    //
+    // TODO It would be preferable to use WaveformMarkSet::findHoveredMark here,
+    // as done by WOverview, but that requires a) making WaveformMarkSet m_marks
+    // a member of this class and b) decoupling the calculation of the
+    // drawoffset from the drawing and c) storing it in WaveformMark.
+
+    for (auto it = m_markPositions.crbegin(); it != m_markPositions.crend(); ++it) {
+        const WaveformMarkPointer& pMark = it->m_pMark;
         VERIFY_OR_DEBUG_ASSERT(pMark) {
             continue;
         }
 
-        int markImagePositionInWidgetSpace = it.value();
+        int markImagePositionInWidgetSpace = it->m_offsetOnScreen;
         QPoint pointInImageSpace;
         if (getOrientation() == Qt::Horizontal) {
             pointInImageSpace = QPoint(point.x() - markImagePositionInWidgetSpace, point.y());
@@ -432,6 +466,24 @@ WaveformMarkPointer WaveformWidgetRenderer::getCueMarkAtPoint(QPoint point) cons
             pointInImageSpace = QPoint(point.x(), point.y() - markImagePositionInWidgetSpace);
         }
         if (pMark->contains(pointInImageSpace, getOrientation())) {
+            return pMark;
+        }
+    }
+    for (auto it = m_markPositions.crbegin(); it != m_markPositions.crend(); ++it) {
+        const WaveformMarkPointer& pMark = it->m_pMark;
+        VERIFY_OR_DEBUG_ASSERT(pMark) {
+            continue;
+        }
+
+        int markImagePositionInWidgetSpace = it->m_offsetOnScreen;
+        QPoint pointInImageSpace;
+        if (getOrientation() == Qt::Horizontal) {
+            pointInImageSpace = QPoint(point.x() - markImagePositionInWidgetSpace, point.y());
+        } else {
+            DEBUG_ASSERT(getOrientation() == Qt::Vertical);
+            pointInImageSpace = QPoint(point.x(), point.y() - markImagePositionInWidgetSpace);
+        }
+        if (pMark->lineHovered(pointInImageSpace, getOrientation())) {
             return pMark;
         }
     }

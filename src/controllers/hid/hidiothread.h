@@ -1,16 +1,15 @@
 #pragma once
 
-#include <QAtomicInteger>
 #include <QSemaphore>
 #include <QThread>
 #include <map>
 
-#include "controllers/controller.h"
 #include "controllers/hid/hiddevice.h"
 #include "controllers/hid/hidioglobaloutputreportfifo.h"
 #include "controllers/hid/hidiooutputreport.h"
 #include "util/compatibility/qmutex.h"
 #include "util/duration.h"
+#include "util/runtimeloggingcategory.h"
 
 enum class HidIoThreadState {
     Initialized,
@@ -80,6 +79,7 @@ class HidIoThread : public QThread {
     unsigned char m_pPollData[kNumBuffers][kBufferSize];
     int m_lastPollSize;
     int m_pollingBufferIndex;
+    bool m_hidReadErrorLogged;
 
     /// Must be locked when a operation changes the size of the m_outputReports map,
     /// or when modify the m_outputReportIterator

@@ -6,7 +6,6 @@
 
 #include "control/control.h"
 #include "preferences/usersettings.h"
-#include "util/platform.h"
 
 //// This class is the successor of ControlObjectThread. It should be used for
 /// new code to avoid unnecessary locking during send if no slot is connected.
@@ -59,7 +58,7 @@ class ControlProxy : public QObject {
             break;
         case Qt::BlockingQueuedConnection:
             // We must not block the signal source by a blocking connection
-            M_FALLTHROUGH_INTENDED;
+            [[fallthrough]];
         default:
             DEBUG_ASSERT(false);
             return false;
@@ -159,7 +158,7 @@ class ControlProxy : public QObject {
     void valueChanged(double);
 
   protected slots:
-    /// Receives the value from the master control by a unique direct connection
+    /// Receives the value from the primary control by a unique direct connection
     void slotValueChangedDirect(double v, QObject* pSetter) {
         if (pSetter != this) {
             // This is base implementation of this function without scaling
@@ -167,7 +166,7 @@ class ControlProxy : public QObject {
         }
     }
 
-    /// Receives the value from the master control by a unique auto connection
+    /// Receives the value from the primary control by a unique auto connection
     void slotValueChangedAuto(double v, QObject* pSetter) {
         if (pSetter != this) {
             // This is base implementation of this function without scaling
@@ -175,7 +174,7 @@ class ControlProxy : public QObject {
         }
     }
 
-    /// Receives the value from the master control by a unique Queued connection
+    /// Receives the value from the primary control by a unique Queued connection
     void slotValueChangedQueued(double v, QObject* pSetter) {
         if (pSetter != this) {
             // This is base implementation of this function without scaling

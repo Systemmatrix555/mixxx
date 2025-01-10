@@ -1,5 +1,6 @@
 #include "widget/wvumeterbase.h"
 
+#include "skin/legacy/skincontext.h"
 #include "util/math.h"
 #include "util/timer.h"
 #include "util/widgethelper.h"
@@ -45,7 +46,7 @@ void WVuMeterBase::setup(const QDomNode& node, const SkinContext& context) {
         // compatibility.
         setPixmapBackground(
                 context.getPixmapSource(backPathNode),
-                context.selectScaleMode(backPathNode, Paintable::FIXED),
+                context.selectScaleMode(backPathNode, Paintable::DrawMode::Fixed),
                 context.getScaleFactor());
     }
 
@@ -54,7 +55,7 @@ void WVuMeterBase::setup(const QDomNode& node, const SkinContext& context) {
     // compatibility.
     setPixmaps(context.getPixmapSource(vuNode),
             bHorizontal,
-            context.selectScaleMode(vuNode, Paintable::FIXED),
+            context.selectScaleMode(vuNode, Paintable::DrawMode::Fixed),
             context.getScaleFactor());
 
     m_iPeakHoldSize = context.selectInt(node, "PeakHoldSize");
@@ -77,6 +78,15 @@ void WVuMeterBase::setup(const QDomNode& node, const SkinContext& context) {
         m_iPeakFallTime = DEFAULT_FALLTIME;
     }
 
+    if (height() < 2 || width() < 2) {
+        // This triggers a QT bug and displays a white widget instead.
+        // We warn here, because the skin designer may not use the affected mode.
+        SKIN_WARNING(node,
+                context,
+                QStringLiteral("VuMeterBase needs to have 2 pixel in all "
+                               "extents to be visible on all targets."));
+    }
+
     setFocusPolicy(Qt::NoFocus);
 }
 
@@ -85,10 +95,10 @@ void WVuMeterBase::setPixmapBackground(
         Paintable::DrawMode mode,
         double scaleFactor) {
     m_pPixmapBack = WPixmapStore::getPaintable(source, mode, scaleFactor);
-    if (m_pPixmapBack.isNull()) {
+    if (!m_pPixmapBack) {
         qDebug() << metaObject()->className()
                  << "Error loading background pixmap:" << source.getPath();
-    } else if (mode == Paintable::FIXED) {
+    } else if (mode == Paintable::DrawMode::Fixed) {
         setFixedSize(m_pPixmapBack->size());
     }
 }
@@ -98,7 +108,7 @@ void WVuMeterBase::setPixmaps(const PixmapSource& source,
         Paintable::DrawMode mode,
         double scaleFactor) {
     m_pPixmapVu = WPixmapStore::getPaintable(source, mode, scaleFactor);
-    if (m_pPixmapVu.isNull()) {
+    if (!m_pPixmapVu) {
         qDebug() << "WVuMeterBase: Error loading vu pixmap" << source.getPath();
     } else {
         m_bHorizontal = bHorizontal;
@@ -171,7 +181,7 @@ void WVuMeterBase::render(VSyncThread* vSyncThread) {
         return;
     }
 
-    ScopedTimer t("WVuMeterBase::render");
+    ScopedTimer t(QStringLiteral("WVuMeterBase::render"));
 
     updateState(vSyncThread->sinceLastSwap());
 

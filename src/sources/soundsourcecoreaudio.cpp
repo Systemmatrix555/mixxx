@@ -1,7 +1,8 @@
 #include "sources/soundsourcecoreaudio.h"
-#include "sources/mp3decoding.h"
 
 #include "engine/engine.h"
+#include "sources/mp3decoding.h"
+#include "util/appleosversion.h"
 #include "util/logger.h"
 #include "util/math.h"
 
@@ -27,7 +28,7 @@ constexpr SINT kMp3MaxSeekPrefetchFrames =
 } // namespace
 
 //static
-const QString SoundSourceProviderCoreAudio::kDisplayName = QStringLiteral("Apple Core Audio");
+const QString SoundSourceProviderCoreAudio::kDisplayName = QStringLiteral("Apple CoreAudio");
 
 //static
 const QStringList SoundSourceProviderCoreAudio::kSupportedFileTypes = {
@@ -46,6 +47,10 @@ SoundSourceProviderPriority SoundSourceProviderCoreAudio::getPriorityHint(
     // On macOS SoundSourceCoreAudio is the preferred decoder for all
     // supported audio formats.
     return SoundSourceProviderPriority::Higher;
+}
+
+QString SoundSourceProviderCoreAudio::getVersionString() const {
+    return getAppleOsVersion();
 }
 
 SoundSourceCoreAudio::SoundSourceCoreAudio(QUrl url)
@@ -111,9 +116,9 @@ SoundSource::OpenResult SoundSourceCoreAudio::tryOpen(
 
     // create the output format
     const UInt32 numChannels =
-            params.getSignalInfo().getChannelCount().isValid() ?
-            params.getSignalInfo().getChannelCount() :
-            mixxx::kEngineChannelCount;
+            params.getSignalInfo().getChannelCount().isValid()
+            ? params.getSignalInfo().getChannelCount()
+            : mixxx::kEngineChannelOutputCount;
     m_outputFormat = CAStreamBasicDescription(m_inputFormat.mSampleRate,
             numChannels,
             CAStreamBasicDescription::kPCMFormatFloat32,

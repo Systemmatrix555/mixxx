@@ -1,8 +1,7 @@
 #pragma once
 
+#include <QEvent>
 #include <QString>
-
-class QEvent;
 
 /// Mixin to mark a widget as a drop target for tracks.
 ///
@@ -22,7 +21,8 @@ class TrackDropTarget {
         emit trackDropped(filename, group); // clazy:exclude=incorrect-emit
     }
 
-    virtual bool handleDragAndDropEventFromWindow(QEvent* event) {
+    virtual bool handleDragAndDropEventFromWindow(QEvent* pEvent) {
+        pEvent->ignore();
         return false;
     }
 

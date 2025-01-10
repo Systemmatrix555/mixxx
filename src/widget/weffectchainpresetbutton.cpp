@@ -3,8 +3,13 @@
 #include <QCheckBox>
 #include <QWidgetAction>
 
+#include "effects/effectparameter.h"
+#include "effects/effectparameterslotbase.h"
+#include "effects/presets/effectchainpreset.h"
+#include "effects/presets/effectpreset.h"
 #include "effects/presets/effectpresetmanager.h"
 #include "moc_weffectchainpresetbutton.cpp"
+#include "util/parented_ptr.h"
 #include "widget/effectwidgetutils.h"
 
 WEffectChainPresetButton::WEffectChainPresetButton(QWidget* parent, EffectsManager* pEffectsManager)
@@ -25,8 +30,10 @@ void WEffectChainPresetButton::setup(const QDomNode& node, const SkinContext& co
     m_pChain = EffectWidgetUtils::getEffectChainFromNode(
             node, context, m_pEffectsManager);
     VERIFY_OR_DEBUG_ASSERT(m_pChain) {
-        SKIN_WARNING(node, context)
-                << "EffectChainPresetButton node could not attach to effect chain";
+        SKIN_WARNING(node,
+                context,
+                QStringLiteral("EffectChainPresetButton node could not attach "
+                               "to effect chain"));
         return;
     }
     connect(m_pChain.get(),
@@ -43,6 +50,7 @@ void WEffectChainPresetButton::setup(const QDomNode& node, const SkinContext& co
                 this,
                 &WEffectChainPresetButton::populateMenu);
     }
+    m_pMenu->setToolTipsVisible(true);
     populateMenu();
 }
 
@@ -50,7 +58,9 @@ void WEffectChainPresetButton::populateMenu() {
     m_pMenu->clear();
 
     // Chain preset items
+    const EffectsBackendManagerPointer pBackendManager = m_pEffectsManager->getBackendManager();
     bool presetIsReadOnly = true;
+    QStringList effectNames;
     for (const auto& pChainPreset : m_pChainPresetManager->getPresetsSorted()) {
         QString title = pChainPreset->name();
         if (title == m_pChain->presetName()) {
@@ -58,9 +68,30 @@ void WEffectChainPresetButton::populateMenu() {
                     QChar(' ') + title;
             presetIsReadOnly = pChainPreset->isReadOnly();
         }
-        m_pMenu->addAction(title, this, [this, pChainPreset]() {
-            m_pChain->loadChainPreset(pChainPreset);
-        });
+        QString tooltip =
+                QStringLiteral("<b>") + pChainPreset->name() + QStringLiteral("</b>");
+        for (const auto& pEffectPreset : pChainPreset->effectPresets()) {
+            if (!pEffectPreset->isEmpty()) {
+                EffectManifestPointer pManifest = pBackendManager->getManifest(pEffectPreset);
+                if (pManifest) {
+                    effectNames.append(pManifest->name());
+                }
+            }
+        }
+        if (effectNames.size() > 1) {
+            tooltip.append("<br/>");
+            tooltip.append(effectNames.join("<br/>"));
+        }
+        effectNames.clear();
+        parented_ptr<QAction> pAction = make_parented<QAction>(title, this);
+        connect(pAction,
+                &QAction::triggered,
+                this,
+                [this, pChainPreset]() {
+                    m_pChain->loadChainPreset(pChainPreset);
+                });
+        pAction->setToolTip(tooltip);
+        m_pMenu->addAction(pAction);
     }
     m_pMenu->addSeparator();
     // This prevents showing the Update button for the empty '---' preset, in case
@@ -69,6 +100,11 @@ void WEffectChainPresetButton::populateMenu() {
     if (!presetIsReadOnly) {
         m_pMenu->addAction(tr("Update Preset"), this, [this]() {
             m_pChainPresetManager->updatePreset(m_pChain);
+        });
+    }
+    if (!presetIsReadOnly && !m_pChain->presetName().isEmpty()) {
+        m_pMenu->addAction(tr("Rename Preset"), this, [this]() {
+            m_pChainPresetManager->renamePreset(m_pChain->presetName());
         });
     }
     m_pMenu->addAction(tr("Save As New Preset..."), this, [this]() {
@@ -93,48 +129,41 @@ void WEffectChainPresetButton::populateMenu() {
                 effectSlotNumPrefix + pEffectSlot->getManifest()->displayName(),
                 m_pMenu);
 
-        const ParameterMap loadedParameters = pEffectSlot->getLoadedParameters();
-        const ParameterMap hiddenParameters = pEffectSlot->getHiddenParameters();
         int numTypes = static_cast<int>(EffectManifestParameter::ParameterType::NumTypes);
         for (int parameterTypeId = 0; parameterTypeId < numTypes; ++parameterTypeId) {
             const EffectManifestParameter::ParameterType parameterType =
                     static_cast<EffectManifestParameter::ParameterType>(parameterTypeId);
-            for (const auto& pParameter : loadedParameters.value(parameterType)) {
-                auto pCheckbox = make_parented<QCheckBox>(pEffectMenu);
-                pCheckbox->setChecked(true);
-                pCheckbox->setText(pParameter->manifest()->name());
-                auto handler = [pCheckbox{pCheckbox.get()}, pEffectSlot, pParameter] {
-                    if (pCheckbox->isChecked()) {
-                        pEffectSlot->showParameter(pParameter);
-                    } else {
-                        pEffectSlot->hideParameter(pParameter);
-                    }
-                };
-                connect(pCheckbox.get(), &QCheckBox::stateChanged, this, handler);
 
-                auto pAction = make_parented<QWidgetAction>(pEffectMenu);
-                pAction->setDefaultWidget(pCheckbox.get());
+            const auto& loadedParameters = pEffectSlot->getLoadedParameters().value(parameterType);
+            const auto& hiddenParameters = pEffectSlot->getHiddenParameters().value(parameterType);
+            for (const auto& parameters : {loadedParameters, hiddenParameters}) {
+                for (const auto& pParameter : parameters) {
+                    auto pCheckbox = make_parented<QCheckBox>(pEffectMenu);
+                    pCheckbox->setChecked(true);
+                    pCheckbox->setText(pParameter->manifest()->name());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+                    auto handler = [pEffectSlot, pParameter](Qt::CheckState state) {
+                        if (state == Qt::Checked) {
+#else
+                    auto handler = [pEffectSlot, pParameter](int state) {
+                        if (static_cast<bool>(state)) {
+#endif
+                            pEffectSlot->showParameter(pParameter);
+                        } else {
+                            pEffectSlot->hideParameter(pParameter);
+                        }
+                    };
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+                    connect(pCheckbox.get(), &QCheckBox::checkStateChanged, this, handler);
+#else
+                    connect(pCheckbox.get(), &QCheckBox::stateChanged, this, handler);
+#endif
 
-                pEffectMenu->addAction(pAction.get());
-            }
+                    auto pAction = make_parented<QWidgetAction>(pEffectMenu);
+                    pAction->setDefaultWidget(pCheckbox.get());
 
-            for (const auto& pParameter : hiddenParameters.value(parameterType)) {
-                auto pCheckbox = make_parented<QCheckBox>(pEffectMenu);
-                pCheckbox->setChecked(false);
-                pCheckbox->setText(pParameter->manifest()->name());
-                auto handler = [pCheckbox{pCheckbox.get()}, pEffectSlot, pParameter] {
-                    if (pCheckbox->isChecked()) {
-                        pEffectSlot->showParameter(pParameter);
-                    } else {
-                        pEffectSlot->hideParameter(pParameter);
-                    }
-                };
-                connect(pCheckbox.get(), &QCheckBox::stateChanged, this, handler);
-
-                auto pAction = make_parented<QWidgetAction>(pEffectMenu);
-                pAction->setDefaultWidget(pCheckbox.get());
-
-                pEffectMenu->addAction(pAction.get());
+                    pEffectMenu->addAction(pAction.get());
+                }
             }
         }
         pEffectMenu->addSeparator();

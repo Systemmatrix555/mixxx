@@ -1,11 +1,10 @@
 #include "widget/wvumeterlegacy.h"
 
-#include <QStyleOption>
-#include <QStylePainter>
-
 #include "moc_wvumeterlegacy.cpp"
+#include "skin/legacy/skincontext.h"
 #include "util/math.h"
 #include "util/timer.h"
+#include "util/widgethelper.h"
 #include "widget/wpixmapstore.h"
 
 #define DEFAULT_FALLTIME 20
@@ -27,6 +26,7 @@ WVuMeterLegacy::WVuMeterLegacy(QWidget* pParent)
           m_iPeakFallTime(0),
           m_dPeakHoldCountdownMs(0) {
     m_timer.start();
+    setAutoFillBackground(true);
 }
 
 void WVuMeterLegacy::setup(const QDomNode& node, const SkinContext& context) {
@@ -41,7 +41,7 @@ void WVuMeterLegacy::setup(const QDomNode& node, const SkinContext& context) {
         // compatibility.
         setPixmapBackground(
                 context.getPixmapSource(backPathNode),
-                context.selectScaleMode(backPathNode, Paintable::FIXED),
+                context.selectScaleMode(backPathNode, Paintable::DrawMode::Fixed),
                 context.getScaleFactor());
     }
 
@@ -50,7 +50,7 @@ void WVuMeterLegacy::setup(const QDomNode& node, const SkinContext& context) {
     // compatibility.
     setPixmaps(context.getPixmapSource(vuNode),
             bHorizontal,
-            context.selectScaleMode(vuNode, Paintable::FIXED),
+            context.selectScaleMode(vuNode, Paintable::DrawMode::Fixed),
             context.getScaleFactor());
 
     m_iPeakHoldSize = context.selectInt(node, "PeakHoldSize");
@@ -81,10 +81,10 @@ void WVuMeterLegacy::setPixmapBackground(
         Paintable::DrawMode mode,
         double scaleFactor) {
     m_pPixmapBack = WPixmapStore::getPaintable(source, mode, scaleFactor);
-    if (m_pPixmapBack.isNull() || m_pPixmapBack->isNull()) {
+    if (!m_pPixmapBack || m_pPixmapBack->isNull()) {
         qDebug() << metaObject()->className()
                  << "Error loading background pixmap:" << source.getPath();
-    } else if (mode == Paintable::FIXED) {
+    } else if (mode == Paintable::DrawMode::Fixed) {
         setFixedSize(m_pPixmapBack->size());
     }
 }
@@ -94,7 +94,7 @@ void WVuMeterLegacy::setPixmaps(const PixmapSource& source,
         Paintable::DrawMode mode,
         double scaleFactor) {
     m_pPixmapVu = WPixmapStore::getPaintable(source, mode, scaleFactor);
-    if (m_pPixmapVu.isNull() || m_pPixmapVu->isNull()) {
+    if (!m_pPixmapVu || m_pPixmapVu->isNull()) {
         qDebug() << "WVuMeterLegacy: Error loading vu pixmap" << source.getPath();
     } else {
         m_bHorizontal = bHorizontal;
@@ -152,20 +152,29 @@ void WVuMeterLegacy::maybeUpdate() {
     }
 }
 
+void WVuMeterLegacy::showEvent(QShowEvent* e) {
+    Q_UNUSED(e);
+    WWidget::showEvent(e);
+    // Find the base color recursively in parent widget.
+    const auto bgColor = mixxx::widgethelper::findBaseColor(this);
+    QPalette pal = QPalette();
+
+    pal.setColor(QPalette::Window, bgColor);
+
+    setPalette(pal);
+}
+
 void WVuMeterLegacy::paintEvent(QPaintEvent* /*unused*/) {
-    ScopedTimer t("WVuMeterLegacy::paintEvent");
+    ScopedTimer t(QStringLiteral("WVuMeterLegacy::paintEvent"));
 
-    QStyleOption option;
-    option.initFrom(this);
-    QStylePainter p(this);
-    p.drawPrimitive(QStyle::PE_Widget, option);
+    QPainter p(this);
 
-    if (!m_pPixmapBack.isNull() && !m_pPixmapBack->isNull()) {
+    if (m_pPixmapBack && !m_pPixmapBack->isNull()) {
         // Draw background. DrawMode takes care of whether to stretch or not.
         m_pPixmapBack->draw(rect(), &p);
     }
 
-    if (!m_pPixmapVu.isNull() && !m_pPixmapVu->isNull()) {
+    if (m_pPixmapVu && !m_pPixmapVu->isNull()) {
         const double widgetWidth = width();
         const double widgetHeight = height();
         const double pixmapWidth = m_pPixmapVu->width();

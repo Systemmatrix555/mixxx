@@ -2,11 +2,8 @@
 
 #include <hidapi.h>
 
-#include <QTimer>
-
-#include "controllers/defs_controllers.h"
-#include "controllers/hid/legacyhidcontrollermappingfilehandler.h"
 #include "moc_hidiothread.cpp"
+#include "util/runtimeloggingcategory.h"
 #include "util/string.h"
 #include "util/time.h"
 #include "util/trace.h"
@@ -43,6 +40,7 @@ HidIoThread::HidIoThread(
           m_pHidDevice(pHidDevice),
           m_lastPollSize(0),
           m_pollingBufferIndex(0),
+          m_hidReadErrorLogged(false),
           m_globalOutputReportFifo(),
           m_runLoopSemaphore(1) {
     // Initializing isn't strictly necessary but is good practice.
@@ -102,16 +100,27 @@ void HidIoThread::pollBufferedInputReports() {
         int bytesRead = hid_read(m_pHidDevice, m_pPollData[m_pollingBufferIndex], kBufferSize);
         if (bytesRead < 0) {
             // -1 is the only error value according to hidapi documentation.
-            qCWarning(m_logOutput) << "Unable to read buffered HID InputReports from"
-                                   << m_deviceInfo.formatName() << ":"
-                                   << mixxx::convertWCStringToQString(
-                                              hid_error(m_pHidDevice),
-                                              kMaxHidErrorMessageSize);
             DEBUG_ASSERT(bytesRead == -1);
+            if (!m_hidReadErrorLogged) {
+                qCWarning(m_logOutput)
+                        << "Unable to read buffered HID InputReports from"
+                        << m_deviceInfo.formatName() << ":"
+                        << mixxx::convertWCStringToQString(
+                                   hid_error(m_pHidDevice),
+                                   kMaxHidErrorMessageSize)
+                        << "Note that, this message is only logged once and "
+                           "may not appear again until all hid_read errors "
+                           "have disappeared.";
+                // Stop logging error messages if every hid_read() fails to avoid large log files
+                m_hidReadErrorLogged = true;
+            }
             break;
-        } else if (bytesRead == 0) {
-            // No InputReports left to be read
-            break;
+        } else {
+            m_hidReadErrorLogged = false; // Allow to log new errors
+            if (bytesRead == 0) {
+                // No InputReports left to be read
+                break;
+            }
         }
         processInputReport(bytesRead);
     }
@@ -158,7 +167,7 @@ QByteArray HidIoThread::getInputReport(quint8 reportID) {
         qCWarning(m_logInput)
                 << "getInputReport is unable to get data from"
                 << m_deviceInfo.formatName() << "serial #"
-                << m_deviceInfo.serialNumber() << ":"
+                << m_deviceInfo.getSerialNumber() << ":"
                 << mixxx::convertWCStringToQString(
                            hid_error(m_pHidDevice), kMaxHidErrorMessageSize);
         // Note, that the GetInputReport request is optional, according to the HID specification,
@@ -175,7 +184,7 @@ QByteArray HidIoThread::getInputReport(quint8 reportID) {
 
     qCDebug(m_logInput) << bytesRead << "bytes received by hid_get_input_report"
                         << m_deviceInfo.formatName() << "serial #"
-                        << m_deviceInfo.serialNumber()
+                        << m_deviceInfo.getSerialNumber()
                         << "(including one byte for the report ID:"
                         << QString::number(static_cast<quint8>(reportID), 16)
                                    .toUpper()
@@ -208,7 +217,7 @@ void HidIoThread::updateCachedOutputReportData(quint8 reportID,
     // If useNonSkippingFIFO is false, the report data are cached here
     // If useNonSkippingFIFO is true, this cache is cleared
     actualOutputReportIterator->second->updateCachedData(
-            data, m_deviceInfo, m_logOutput, &m_globalOutputReportFifo, useNonSkippingFIFO);
+            data, m_logOutput, useNonSkippingFIFO);
 
     // If useNonSkippingFIFO is true, put the new report dataset on the FIFO
     if (useNonSkippingFIFO) {
@@ -250,7 +259,7 @@ bool HidIoThread::sendNextCachedOutputReport() {
         // The standard says that "No iterators or references are invalidated." using this operator.
         // Therefore m_outputReportIterator doesn't require Mutex protection.
         if (m_outputReportIterator->second->sendCachedData(
-                    &m_hidDeviceAndPollMutex, m_pHidDevice, m_deviceInfo, m_logOutput)) {
+                    &m_hidDeviceAndPollMutex, m_pHidDevice, m_logOutput)) {
             // Return after each time consuming sendCachedData
             return true;
         }
@@ -277,7 +286,7 @@ void HidIoThread::sendFeatureReport(
         qCWarning(m_logOutput)
                 << "sendFeatureReport is unable to send data to"
                 << m_deviceInfo.formatName() << "serial #"
-                << m_deviceInfo.serialNumber() << ":"
+                << m_deviceInfo.getSerialNumber() << ":"
                 << mixxx::convertWCStringToQString(
                            hid_error(m_pHidDevice), kMaxHidErrorMessageSize);
         return;
@@ -288,7 +297,7 @@ void HidIoThread::sendFeatureReport(
     qCDebug(m_logOutput)
             << result << "bytes sent by sendFeatureReport to"
             << m_deviceInfo.formatName() << "serial #"
-            << m_deviceInfo.serialNumber() << "(including report ID of"
+            << m_deviceInfo.getSerialNumber() << "(including report ID of"
             << reportID << ") - Needed: "
             << (mixxx::Time::elapsed() - startOfHidSendFeatureReport)
                        .formatMicrosWithUnit();
@@ -311,7 +320,7 @@ QByteArray HidIoThread::getFeatureReport(
         qCWarning(m_logInput)
                 << "getFeatureReport is unable to get data from"
                 << m_deviceInfo.formatName() << "serial #"
-                << m_deviceInfo.serialNumber() << ":"
+                << m_deviceInfo.getSerialNumber() << ":"
                 << mixxx::convertWCStringToQString(
                            hid_error(m_pHidDevice), kMaxHidErrorMessageSize);
         return {};
@@ -322,7 +331,7 @@ QByteArray HidIoThread::getFeatureReport(
     qCDebug(m_logInput)
             << bytesRead << "bytes received by getFeatureReport from"
             << m_deviceInfo.formatName() << "serial #"
-            << m_deviceInfo.serialNumber()
+            << m_deviceInfo.getSerialNumber()
             << "(including one byte for the report ID:"
             << QString::number(static_cast<quint8>(reportID), 16)
                        .toUpper()

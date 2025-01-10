@@ -1,20 +1,17 @@
 #pragma once
 
-#include <QFileInfo>
 #include <QList>
 #include <QObject>
 #include <QSet>
-#include <QSqlDatabase>
 #include <QString>
+#include <memory>
 
 #include "library/dao/dao.h"
 #include "library/relocatedtrack.h"
 #include "preferences/usersettings.h"
 #include "track/globaltrackcache.h"
 #include "util/class.h"
-#include "util/memory.h"
 
-class FwdSqlQuery;
 class SqlTransaction;
 class PlaylistDAO;
 class AnalysisDao;
@@ -22,7 +19,6 @@ class CueDAO;
 class LibraryHashDAO;
 
 namespace mixxx {
-
 class FileInfo;
 class TrackRecord;
 
@@ -51,6 +47,9 @@ class TrackDAO : public QObject, public virtual DAO, public virtual GlobalTrackC
 
     void finish();
 
+    QList<TrackId> resolveTrackIds(
+            const QList<QUrl>& urls,
+            ResolveTrackIdFlags flags = ResolveTrackIdFlag::ResolveOnly);
     QList<TrackId> resolveTrackIds(
             const QList<mixxx::FileInfo>& fileInfos,
             ResolveTrackIdFlags flags = ResolveTrackIdFlag::ResolveOnly);
@@ -133,6 +132,10 @@ class TrackDAO : public QObject, public virtual DAO, public virtual GlobalTrackC
     friend class TrackCollection;
     friend class TrackAnalysisScheduler;
 
+    QList<TrackId> resolveTrackIds(
+            const QStringList& pathList,
+            ResolveTrackIdFlags flags = ResolveTrackIdFlag::ResolveOnly);
+
     TrackId getTrackIdByLocation(
             const QString& location) const;
     TrackPointer getTrackById(
@@ -196,9 +199,7 @@ class TrackDAO : public QObject, public virtual DAO, public virtual GlobalTrackC
                                         QSet<TrackId>* pTracksChanged);
 
     // Callback for GlobalTrackCache
-    mixxx::FileAccess relocateCachedTrack(
-            TrackId trackId,
-            mixxx::FileAccess fileAccess) override;
+    mixxx::FileAccess relocateCachedTrack(TrackId trackId) override;
 
     CueDAO& m_cueDao;
     PlaylistDAO& m_playlistDao;

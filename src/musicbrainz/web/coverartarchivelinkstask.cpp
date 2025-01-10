@@ -60,6 +60,7 @@ QNetworkReply* CoverArtArchiveLinksTask::sendNetworkRequest(
         const QJsonDocument& content) {
     DEBUG_ASSERT(pNetworkAccessManager);
     Q_UNUSED(method);
+    Q_UNUSED(content);
     DEBUG_ASSERT(method == network::HttpRequestMethod::Get);
     pNetworkAccessManager->setRedirectPolicy(QNetworkRequest::NoLessSafeRedirectPolicy);
 
@@ -160,7 +161,7 @@ void CoverArtArchiveLinksTask::emitSucceeded(
         deleteLater();
         return;
     }
-    emit succeeded(allUrls);
+    emit succeeded(m_albumReleaseId, allUrls);
 }
 
 } // namespace mixxx
